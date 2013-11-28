@@ -1,0 +1,418 @@
+--[[
+Fresco v 0.9.0
+Matti Vapa, 2013
+
+This program will take as an argument a URL to an image file and request a copy of
+it via a server that converts it to a proper format. It then reproduces the image
+using Glowstone Illuminators from Thermal Expansion. Required mods are
+
+	* ComputerCraft (duh)
+	* Thermal Expansion
+	* OpenPeripheral
+	(* MiscPeripherals if you want to use Resupply Station)
+
+Instead of a direct URL you can also input a Minecraft username with the -u handle.
+The program will download the skin corresponding to the username and build the face
+part of the skin.
+
+Possible future features:
+	
+	* Ability to specify a part of the image to be build, so multiple turtles can
+	  be used for the same picture. This will probably be implemented.
+	* Pure Lua Image library to remove external server and HTTP dependecy. This
+	  is not a priority however.
+	* Add more comments so people can easily modify this code.
+
+Changelog:
+
+	0.1.0 - 0.8.0:
+				* Added most features and tested until 6 AM.
+	
+	0.9.0:
+				* Released for public testing.
+
+]]--
+
+if not http then
+	print("HTTP must be enabled.")
+	return
+end
+
+
+VERSION = "0.9.0"
+
+print("Fresco v "..VERSION)
+
+apiURL = "http://lakka.kapsi.fi:62096"
+playerURL = "http://s3.amazonaws.com/MinecraftSkins/"
+
+local chest = nil
+local supply = nil
+local url
+local maxsize
+local height,width
+local row,column
+-- for finding the face in the skin file
+local offsetY,offsetX = 0,0
+local ascend
+local descend
+
+local usage = function()
+	print("Usage:")
+	print("fresco [-h] [-u playername] [url] [size]")
+	print("Either playername with -u option or url to image must be supplied.")
+	print("With -u option the size parameter is the dimensions of the face (default 8 pixels).")
+
+	--[[
+	print("Options:")
+	print("-u    Uses the face from the skin of the player with the name 'playername' as the image.")
+	print("      If you use -u you don't need to provide the url as an argument.")
+	print("url   The url to the desired picture in the form 'http://www.images.com/coolpic.png'.")
+	print("      Not needed if you use -u.")
+	print("size  The maximum lenght of the longer side. The image will be (down/up)scaled to fit this size.")
+	print("      With -u the size is the size of the players face, default 8 pixels.")
+	]]--
+end
+
+local move = function(f)
+	if turtle.getFuelLevel() < 1 then
+		print("Low on fuel. Please add fuel to my inventory.")
+		while turtle.getFuelLevel() < 1 do
+			os.sleep(5)
+			print("Checking for fuel...")
+			shell.run("refuel all")
+		end
+	end
+	while not f() do
+		sleep(0.3)
+	end
+	sleep(0.1)
+end
+
+local resupplyFromStation = function()
+	while not supply.resupply(1) do
+		print("Please restock the Resupply Station.")
+		sleep(10)
+	end
+end
+
+local resupplyFromChest = function()
+	local r = row
+	local c = column
+	while r < height do
+		move(turtle.down)
+		r = r + 1
+	end
+	turtle.turnLeft()
+	while c > 1 do
+		move(turtle.forward)
+		c = c - 1
+	end
+	turtle.turnRight()
+	move(turtle.back)
+	local slot = 0
+	chest.condense()
+	while not chest.getStackInSlot(0) do
+			print("Please add more Illuminators to the chest.")
+			sleep(5)
+			chest.condense()
+	end
+	chest.pushIntoSlot("down",0,64,slot)
+	slot = 1
+	while slot < 15 do
+		chest.condense()
+		if not chest.getStackInSlot(0) then
+			break
+		end
+		chest.pushIntoSlot("down",0,64,slot)
+		slot = slot + 1
+	end
+	move(turtle.forward)
+	turtle.turnRight()
+	while c < column do
+		move(turtle.forward)
+		c = c + 1
+	end
+	turtle.turnLeft()
+	while r > row do
+		move(turtle.up)
+		r = r - 1
+	end
+end
+
+local placeFront = function(color)
+	if turtle.detect() then return end
+	if turtle.getItemCount(1) < 2 then
+		if supply then
+			resupplyFromStation()
+		elseif turtle.getItemCount(1) == 0 then
+			local slot = 2
+			while slot <= 16 do
+				turtle.select(slot)
+				if turtle.transferTo(1) then
+					break
+				end
+				slot = slot + 1
+			end
+			if slot > 16 then
+				resupplyFromChest()
+			end
+		end
+	end
+	turtle.select(1)
+	turtle.place()
+	local lamp = peripheral.wrap("front")
+	lamp.setColor(tonumber(color,16))
+	turtle.attack()
+end
+
+local placeDown = function(color)
+	if turtle.detectDown() then return end
+	if turtle.getItemCount(1) < 2 then
+		if supply then
+			resupplyFromStation()
+		elseif turtle.getItemCount(1) == 0 then
+			local slot = 2
+			while slot <= 16 do
+				turtle.select(slot)
+				if turtle.transferTo(1) then
+					break
+				end
+				slot = slot + 1
+			end
+			if slot > 16 then
+				resupplyFromChest()
+			end
+		end
+	end
+	turtle.select(1)
+	turtle.placeDown()
+	local lamp = peripheral.wrap("bottom")
+	lamp.setColor(tonumber(color,16))
+	turtle.attackDown()
+end
+
+local calcFuelNeed = function (h,w)
+	local fuel = (h-1)*w+w+1
+	if w%2 == 1 then
+		fuel = fuel + (h-1)
+	end
+	if chest then
+		local fuelruns = math.floor((w*h-1)/1024)
+		for i = 1,fuelruns do
+			local columns, frac = math.modf(i*1024/h)
+			-- horizontal movement
+			fuel = fuel + 2*(columns+1)+2
+			-- vertical movement
+			if columns % 2 == 1 then
+				fuel = fuel + 2*(h-math.floor(frac*h+0.5)-1)
+			else
+				fuel = fuel + 2*(math.floor(frac*h+0.5)-1)
+			end
+		end
+	end
+	return fuel
+end
+
+
+_args = {...}
+args = {}
+local place = turtle.
+
+local i = 1
+while i <= #_args do
+	if _args[i] == "-h" then
+		place = placeDown
+	elseif _args[i]:sub(1,1) == "-" then
+		args[_args[i]] = _args[i+1]
+		i = i + 1
+	elseif tonumber(_args[i]) ~= nil then
+		args["maxsize"] = _args[i]
+	else
+		args["url"] = _args[i]
+	end
+	i = i + 1
+end
+
+
+
+if not args["url"] and not args["-u"] then
+	usage()
+	return
+else
+	if args["-u"] ~= nil then
+		url = playerURL..args["-u"]..".png"
+		if args["maxsize"] then
+				maxsize = tostring(math.floor(tonumber(args["maxsize"])*(64/8)+0.5))
+		end
+	else
+		url = args["url"]
+		--[[
+		if url:sub(1,7) ~= "http://" and
+			url = "http://"..url
+		end
+		]]--
+		maxsize = args["maxsize"]
+	end
+	
+end
+
+if not url then
+	usage()
+	return
+end
+
+local vars = "url="..url
+if maxsize then
+	vars = vars.."&maxsize="..maxsize
+end
+sleep(0.5)
+print("Requesting image from")
+print(url)
+f = http.post(apiURL,vars)
+if not f then
+	print("No response from image server.")
+	return
+elseif f.getResponseCode() ~= 200 then
+	print("Error while connecting to server!")
+	print("Server response")
+	print("Code: "..f.getResponseCode())
+	print("Message:")
+	print(f.readAll())
+	return
+end
+
+local oldSize = f.readLine()
+local newSize = f.readLine()
+if oldSize ~= newSize then
+	print("Original image size was (w,h): "..oldSize)
+	print("New size is (w,h): "..newSize)
+else
+	print("Image size is (w,h): "..newSize)
+end
+
+local img = {}
+
+line = f.readLine()
+while line ~= nil do
+	table.insert(img,line)
+	line = f.readLine()
+end
+f.close()
+
+
+-- X:8, Y:8 to X: 15, Y:15 (top left, bottom right of face)
+maxsize = tonumber(maxsize)
+if args["-u"] then
+	if maxsize then
+		-- multiply by 8/64 to get the face size and hack a rounding function
+		local size = math.floor(maxsize*0.125+0.5)
+		height,width = size,size
+		offsetY,offsetX = size,size
+	else
+		height,width = 8,8
+		offsetY,offsetX = 8,8
+	end
+else
+	height,width = #img, #img[1]/8
+	row,column = height,1
+end
+
+row,column = height,1
+sleep(0.5)
+print("Press return to continue.")
+local e,c = os.pullEvent("key")
+while c ~= 28 do
+	e,c = os.pullEvent("key")
+end
+
+if peripheral.getType("right") == "resupply" then
+	print("Resupply module located, using that for resupply.")
+	supply = peripheral.wrap("right")
+	if not supply.link() then
+		print("\nCould not locate Resupply Station!\nPlease put a Resupply Station near me.")
+		return
+	end
+else
+	print("No resupply module, there should be a chest on top of me.")
+	if peripheral.getType("top") == nil then
+		print("No valid inventory found on top.")
+		return
+	end
+	chest = peripheral.wrap("top")
+	if chest.pushIntoSlot == nil then
+		print("Inventory does not support required operations.")
+		return
+	end
+end
+sleep(0.5)
+print("Calculating needed fuel...")
+local fuelNeed = calcFuelNeed(height,width)
+sleep(0.5)
+print("Fuel consumption will be (approximate): "..tostring(fuelNeed))
+print("Current fuel level is: "..tostring(turtle.getFuelLevel()))
+if turtle.getFuelLevel() < fuelNeed then
+	while turtle.getFuelLevel() < fuelNeed do
+		print("Please put more fuel into my inventory.")
+		sleep(5)
+		print("Checking for fuel...")
+		shell.run("refuel all")
+	end
+end
+
+while turtle.getItemCount(1) < 1 do
+	if chest then
+		print("Please put Glowstone Illuminators into my inventory.")
+	else
+		print("Please put Glowstone Illuminators into the first slot of my inventory.")
+	end
+	print("Press return to continue.")
+	local e,c = os.pullEvent("key")
+	while c ~= 28 do
+		e,c = os.pullEvent("key")
+	end
+end
+
+print("Good to go!")
+print(string.format("The process will take around %f minutes to finish.",(1.2*fuelNeed)/60))
+print("Press return to begin.")
+e,c = os.pullEvent("key")
+while c ~= 28 do
+	e,c = os.pullEvent("key")
+end
+
+print("Starting printing...")
+
+move(turtle.forward)
+turtle.select(1)
+while true do
+	if column > width then break end
+	place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
+	while row > 1 do
+		move(turtle.up)
+		row = row - 1
+		place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
+	end
+	turtle.turnRight()
+	move(turtle.forward)
+	turtle.turnLeft()
+	column = column + 1
+	if column > width then break end
+	place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
+	while row < height do
+		move(turtle.down)
+		row = row + 1
+		place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
+	end
+	turtle.turnRight()
+	move(turtle.forward)
+	turtle.turnLeft()
+	column = column + 1
+end
+
+if width % 2 == 1 then
+	while not turtle.detectDown() do
+		turtle.down()
+		sleep(0.3)
+	end
+end
