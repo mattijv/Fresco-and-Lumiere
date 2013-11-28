@@ -1,6 +1,8 @@
 --[[
-Fresco v 0.9.0
+Fresco v 1.0.0
 Matti Vapa, 2013
+https://github.com/mattijv/fresco
+http://pastebin.com/KU8RWSQd
 
 This program will take as an argument a URL to an image file and request a copy of
 it via a server that converts it to a proper format. It then reproduces the image
@@ -19,8 +21,6 @@ Possible future features:
 	
 	* Ability to specify a part of the image to be build, so multiple turtles can
 	  be used for the same picture. This will probably be implemented.
-	* Pure Lua Image library to remove external server and HTTP dependecy. This
-	  is not a priority however.
 	* Add more comments so people can easily modify this code.
 
 Changelog:
@@ -30,6 +30,9 @@ Changelog:
 	
 	0.9.0:
 				* Released for public testing.
+	1.0.0:
+				* Added option to build the image horizontally
+				* Cleaning up the code.
 
 ]]--
 
@@ -39,7 +42,7 @@ if not http then
 end
 
 
-VERSION = "0.9.0"
+VERSION = "1.0.0"
 
 print("Fresco v "..VERSION)
 
@@ -54,8 +57,9 @@ local height,width
 local row,column
 -- for finding the face in the skin file
 local offsetY,offsetX = 0,0
-local ascend
-local descend
+local ascend = turtle.up
+local descend = turtle.down
+local place = placeFront
 
 local usage = function()
 	print("Usage:")
@@ -75,12 +79,14 @@ local usage = function()
 end
 
 local move = function(f)
-	if turtle.getFuelLevel() < 1 then
-		print("Low on fuel. Please add fuel to my inventory.")
-		while turtle.getFuelLevel() < 1 do
-			os.sleep(5)
-			print("Checking for fuel...")
-			shell.run("refuel all")
+	while turtle.getFuelLevel() < 1 do
+		print("Low on fuel. Please add fuel to my inventory and press return.")
+		local e,c = os.pullEvent("key")
+		while c ~= 28 do
+			e,c = os.pullEvent("key")
+		end
+		print("Checking for fuel...")
+		shell.run("refuel all")
 		end
 	end
 	while not f() do
@@ -100,7 +106,7 @@ local resupplyFromChest = function()
 	local r = row
 	local c = column
 	while r < height do
-		move(turtle.down)
+		move(descend)
 		r = r + 1
 	end
 	turtle.turnLeft()
@@ -135,7 +141,7 @@ local resupplyFromChest = function()
 	end
 	turtle.turnLeft()
 	while r > row do
-		move(turtle.up)
+		move(ascend)
 		r = r - 1
 	end
 end
@@ -217,12 +223,13 @@ end
 
 _args = {...}
 args = {}
-local place = turtle.
 
 local i = 1
 while i <= #_args do
 	if _args[i] == "-h" then
 		place = placeDown
+		ascend = turtle.forward
+		descend = turtle.back
 	elseif _args[i]:sub(1,1) == "-" then
 		args[_args[i]] = _args[i+1]
 		i = i + 1
@@ -247,11 +254,6 @@ else
 		end
 	else
 		url = args["url"]
-		--[[
-		if url:sub(1,7) ~= "http://" and
-			url = "http://"..url
-		end
-		]]--
 		maxsize = args["maxsize"]
 	end
 	
@@ -345,6 +347,7 @@ else
 		return
 	end
 end
+print("Resupply inventory located.")
 sleep(0.5)
 print("Calculating needed fuel...")
 local fuelNeed = calcFuelNeed(height,width)
@@ -353,13 +356,18 @@ print("Fuel consumption will be (approximate): "..tostring(fuelNeed))
 print("Current fuel level is: "..tostring(turtle.getFuelLevel()))
 if turtle.getFuelLevel() < fuelNeed then
 	while turtle.getFuelLevel() < fuelNeed do
-		print("Please put more fuel into my inventory.")
-		sleep(5)
+		print(string.format("Need %d fuel units more.",(fuelNeed-turtle.getFuelLevel()))
+		print("Please put more fuel into my inventory and press return.")
+		local e,c = os.pullEvent("key")
+		while c ~= 28 do
+			e,c = os.pullEvent("key")
+		end
 		print("Checking for fuel...")
 		shell.run("refuel all")
 	end
 end
-
+print("Fuel requirements met. Looking for building materials...")
+sleep(0.3)
 while turtle.getItemCount(1) < 1 do
 	if chest then
 		print("Please put Glowstone Illuminators into my inventory.")
@@ -389,7 +397,7 @@ while true do
 	if column > width then break end
 	place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
 	while row > 1 do
-		move(turtle.up)
+		move(ascend)
 		row = row - 1
 		place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
 	end
@@ -400,7 +408,7 @@ while true do
 	if column > width then break end
 	place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
 	while row < height do
-		move(turtle.down)
+		move(descend)
 		row = row + 1
 		place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
 	end
@@ -411,8 +419,7 @@ while true do
 end
 
 if width % 2 == 1 then
-	while not turtle.detectDown() do
-		turtle.down()
-		sleep(0.3)
+	for i = 1, height-1 do
+		move(descend)
 	end
 end
