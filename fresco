@@ -59,7 +59,6 @@ local row,column
 local offsetY,offsetX = 0,0
 local ascend = turtle.up
 local descend = turtle.down
-local place = placeFront
 
 local usage = function()
 	print("Usage:")
@@ -87,7 +86,6 @@ local move = function(f)
 		end
 		print("Checking for fuel...")
 		shell.run("refuel all")
-		end
 	end
 	while not f() do
 		sleep(0.3)
@@ -224,6 +222,9 @@ end
 _args = {...}
 args = {}
 
+
+local place = placeFront
+
 local i = 1
 while i <= #_args do
 	if _args[i] == "-h" then
@@ -240,7 +241,6 @@ while i <= #_args do
 	end
 	i = i + 1
 end
-
 
 
 if not args["url"] and not args["-u"] then
@@ -356,7 +356,7 @@ print("Fuel consumption will be (approximate): "..tostring(fuelNeed))
 print("Current fuel level is: "..tostring(turtle.getFuelLevel()))
 if turtle.getFuelLevel() < fuelNeed then
 	while turtle.getFuelLevel() < fuelNeed do
-		print(string.format("Need %d fuel units more.",(fuelNeed-turtle.getFuelLevel()))
+		print(string.format("Need %d fuel units more.",fuelNeed-turtle.getFuelLevel()))
 		print("Please put more fuel into my inventory and press return.")
 		local e,c = os.pullEvent("key")
 		while c ~= 28 do
