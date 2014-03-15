@@ -1,5 +1,5 @@
 --[[
-Fresco v 1.0.0
+Fresco v 1.1.0
 Matti Vapa, 2013
 https://github.com/mattijv/fresco
 http://pastebin.com/KU8RWSQd
@@ -8,10 +8,9 @@ This program will take as an argument a URL to an image file and request a copy 
 it via a server that converts it to a proper format. It then reproduces the image
 using Glowstone Illuminators from Thermal Expansion. Required mods are
 
-	* ComputerCraft (duh)
-	* Thermal Expansion
-	* OpenPeripheral
-	(* MiscPeripherals if you want to use Resupply Station)
+	* ComputerCraft (duh),
+	* Thermal Expansion,
+	* OpenPeripheral.
 
 Instead of a direct URL you can also input a Minecraft username with the -u handle.
 The program will download the skin corresponding to the username and build the face
@@ -21,8 +20,7 @@ Possible future features:
 	
 	* Ability to specify a part of the image to be build, so multiple turtles can
 	  be used for the same picture. This will probably be implemented.
-	* Add more comments so people can easily modify this code. Also to pretend that I'm
-	  a real programmer.
+	* Add more comments so people can easily modify this code.
 
 Changelog:
 
@@ -32,34 +30,22 @@ Changelog:
 	0.9.0:
 				* Released for public testing.
 	1.0.0:
-				* Added option to build the image horizontally
+				* Added option to build the image horizontally.
 				* Cleaning up the code.
-				* Added a licence.
+	1.1.0:
+				* Updated to match the OpenPeripheral API changes.
+				  For older modpacks, use the previous version:
+				  http://pastebin.com/42KWALhR
+				* Added the option to restart an uncomplete build.
+				* Removed MiscPeripherals support as the mod is no
+				  longer updated. :/
+				* Removed cosmetic calls of sleep() in the startup.
+				* Fixed a crash caused by someone standing in front
+				  of the turtle while it was placing Illuminators.
+				* Fixed punctuation in the change log.
 
-
-
-The MIT License (MIT)
-
-Copyright (c) 2013 Matti Vapa
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
+Thanks to VerTiGo_Etrex and Mikrysoft for pointing out the changes in the
+OpenPeripheral API.
 
 ]]--
 
@@ -69,7 +55,7 @@ if not http then
 end
 
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 print("Fresco v "..VERSION)
 
@@ -77,8 +63,9 @@ apiURL = "http://lakka.kapsi.fi:62096"
 playerURL = "http://s3.amazonaws.com/MinecraftSkins/"
 
 local chest = nil
-local supply = nil
 local url
+local restart
+local skip
 local maxsize
 local height,width
 local row,column
@@ -89,15 +76,18 @@ local descend = turtle.down
 
 local usage = function()
 	print("Usage:")
-	print("fresco [-h] [-u playername] [url] [size]")
-	print("Either playername with -u option or url to image must be supplied.")
+	print("fresco [-h] [-u playername] [url] [size] [-r]")
+	print("Either a playername with -u option or url to image must be supplied.")
 	print("With -u option the size parameter is the dimensions of the face (default 8 pixels).")
+	print("The size option is the length of the longest size in the finished build.")
+	print("Use -r to restart a failed build. You will be prompted for a number of columns to skip.")
+	print("The number of columns should be equal to the number of completed columns.")
 
 	--[[
 	print("Options:")
 	print("-u    Uses the face from the skin of the player with the name 'playername' as the image.")
 	print("      If you use -u you don't need to provide the url as an argument.")
-	print("url   The url to the desired picture in the form 'http://www.images.com/coolpic.png'.")
+	print("url   The url to the desired picture in the form: http://www.images.com/coolpic.png.")
 	print("      Not needed if you use -u.")
 	print("size  The maximum lenght of the longer side. The image will be (down/up)scaled to fit this size.")
 	print("      With -u the size is the size of the players face, default 8 pixels.")
@@ -120,14 +110,8 @@ local move = function(f)
 	sleep(0.1)
 end
 
-local resupplyFromStation = function()
-	while not supply.resupply(1) do
-		print("Please restock the Resupply Station.")
-		sleep(10)
-	end
-end
 
-local resupplyFromChest = function()
+local resupply = function()
 	local r = row
 	local c = column
 	while r < height do
@@ -141,21 +125,21 @@ local resupplyFromChest = function()
 	end
 	turtle.turnRight()
 	move(turtle.back)
-	local slot = 0
-	chest.condense()
-	while not chest.getStackInSlot(0) do
+	local slot = 1
+	chest.condenseItems()
+	while not chest.getStackInSlot(1) do
 			print("Please add more Illuminators to the chest.")
 			sleep(5)
-			chest.condense()
+			chest.condenseItems()
 	end
-	chest.pushIntoSlot("down",0,64,slot)
-	slot = 1
-	while slot < 15 do
-		chest.condense()
-		if not chest.getStackInSlot(0) then
+	chest.pushItemIntoSlot("down",1,64,slot)
+	slot = 2
+	while slot < 16 do
+		chest.condenseItems()
+		if not chest.getStackInSlot(1) then
 			break
 		end
-		chest.pushIntoSlot("down",0,64,slot)
+		chest.pushItemIntoSlot("down",1,64,slot)
 		slot = slot + 1
 	end
 	move(turtle.forward)
@@ -174,9 +158,7 @@ end
 local placeFront = function(color)
 	if turtle.detect() then return end
 	if turtle.getItemCount(1) < 2 then
-		if supply then
-			resupplyFromStation()
-		elseif turtle.getItemCount(1) == 0 then
+		if turtle.getItemCount(1) == 0 then
 			local slot = 2
 			while slot <= 16 do
 				turtle.select(slot)
@@ -186,12 +168,15 @@ local placeFront = function(color)
 				slot = slot + 1
 			end
 			if slot > 16 then
-				resupplyFromChest()
+				resupply()
 			end
 		end
 	end
 	turtle.select(1)
-	turtle.place()
+	while not turtle.place() do
+		print("Outta my way!")
+		sleep(1)
+	end
 	local lamp = peripheral.wrap("front")
 	lamp.setColor(tonumber(color,16))
 	turtle.attack()
@@ -200,9 +185,7 @@ end
 local placeDown = function(color)
 	if turtle.detectDown() then return end
 	if turtle.getItemCount(1) < 2 then
-		if supply then
-			resupplyFromStation()
-		elseif turtle.getItemCount(1) == 0 then
+		if turtle.getItemCount(1) == 0 then
 			local slot = 2
 			while slot <= 16 do
 				turtle.select(slot)
@@ -212,12 +195,15 @@ local placeDown = function(color)
 				slot = slot + 1
 			end
 			if slot > 16 then
-				resupplyFromChest()
+				resupply()
 			end
 		end
 	end
 	turtle.select(1)
-	turtle.placeDown()
+	while not turtle.placeDown() do
+		print("Outta my way!")
+		sleep(1)
+	end
 	local lamp = peripheral.wrap("bottom")
 	lamp.setColor(tonumber(color,16))
 	turtle.attackDown()
@@ -258,6 +244,8 @@ while i <= #_args do
 		place = placeDown
 		ascend = turtle.forward
 		descend = turtle.back
+	elseif _args[i] == "-r" then
+		restart = true
 	elseif _args[i]:sub(1,1) == "-" then
 		args[_args[i]] = _args[i+1]
 		i = i + 1
@@ -295,7 +283,6 @@ local vars = "url="..url
 if maxsize then
 	vars = vars.."&maxsize="..maxsize
 end
-sleep(0.5)
 print("Requesting image from")
 print(url)
 f = http.post(apiURL,vars)
@@ -348,37 +335,26 @@ else
 end
 
 row,column = height,1
-sleep(0.5)
 print("Press return to continue.")
 local e,c = os.pullEvent("key")
 while c ~= 28 do
 	e,c = os.pullEvent("key")
 end
 
-if peripheral.getType("right") == "resupply" then
-	print("Resupply module located, using that for resupply.")
-	supply = peripheral.wrap("right")
-	if not supply.link() then
-		print("\nCould not locate Resupply Station!\nPlease put a Resupply Station near me.")
-		return
-	end
-else
-	print("No resupply module, there should be a chest on top of me.")
-	if peripheral.getType("top") == nil then
-		print("No valid inventory found on top.")
-		return
-	end
-	chest = peripheral.wrap("top")
-	if chest.pushIntoSlot == nil then
-		print("Inventory does not support required operations.")
-		return
-	end
+
+if peripheral.getType("top") == nil then
+	print("No valid inventory found on top.")
+	return
 end
+chest = peripheral.wrap("top")
+if chest.pushItemIntoSlot == nil then
+	print("Inventory does not support required operation: pushItemIntoSlot.")
+	return
+end
+
 print("Resupply inventory located.")
-sleep(0.5)
 print("Calculating needed fuel...")
 local fuelNeed = calcFuelNeed(height,width)
-sleep(0.5)
 print("Fuel consumption will be (approximate): "..tostring(fuelNeed))
 print("Current fuel level is: "..tostring(turtle.getFuelLevel()))
 if turtle.getFuelLevel() < fuelNeed then
@@ -394,13 +370,8 @@ if turtle.getFuelLevel() < fuelNeed then
 	end
 end
 print("Fuel requirements met. Looking for building materials...")
-sleep(0.3)
 while turtle.getItemCount(1) < 1 do
-	if chest then
-		print("Please put Glowstone Illuminators into my inventory.")
-	else
-		print("Please put Glowstone Illuminators into the first slot of my inventory.")
-	end
+	print("Please put Glowstone Illuminators into the first slot of my inventory.")
 	print("Press return to continue.")
 	local e,c = os.pullEvent("key")
 	while c ~= 28 do
@@ -416,10 +387,39 @@ while c ~= 28 do
 	e,c = os.pullEvent("key")
 end
 
+if restart then
+	print("You wanted to restart.")
+	print("Please input how many columns to skip (or press return to cancel).")
+	while true do
+		term.write("Columns: ")
+		skip = io.read()
+		if columns == "" then return end
+		if not tonumber(skip) or tonumber(skip) < 0 or tonumber(skip) >= width then
+			print("Bad input!")
+		else
+			print("Skipping "..skip.." columns.")
+			skip = tonumber(skip)
+			break
+		end
+	end
+end
+
 print("Starting printing...")
 
 move(turtle.forward)
 turtle.select(1)
+
+if restart then
+	turtle.turnRight()
+	column = skip + 1
+	local c = 1
+	while c < column do
+		move(turtle.forward)
+		c = c + 1
+	end
+	turtle.turnLeft()
+end
+
 while true do
 	if column > width then break end
 	place(img[row+offsetY]:sub(1+8*(column-1+offsetX),1+8*(column-1+offsetX)+7))
