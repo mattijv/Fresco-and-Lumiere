@@ -1,7 +1,7 @@
 --[[
 Fresco v 1.1.0
-Matti Vapa, 2013
-https://github.com/mattijv/fresco
+Matti Vapa, 2013-2014
+https://github.com/mattijv/fresco-and-lumiere
 http://pastebin.com/KU8RWSQd
 
 This program will take as an argument a URL to an image file and request a copy of
