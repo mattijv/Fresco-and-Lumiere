@@ -1,0 +1,333 @@
+--[[
+Lumiere v 0.9.0
+Matti Vapa, 2014
+https://github.com/mattijv/fresco-and-lumiere
+http://pastebin.com/--------
+
+This program was made to control a screen of Glowstone Illuminators. Required mods are
+
+	* ComputerCraft (duh),
+	* Thermal Expansion,
+	* OpenPeripheral.
+
+In itself this program contains only rudimentary functions for demo purposes. Lumiere is
+ment to be used as an API, like so
+
+		os.load("lumiere")
+
+		screen = lumiere.initScreen(16,16,"back")
+
+		screen:setColor("0xFF0000")
+
+More detailed tutorial on the capabilities can be found here: http://pastebin.com/B6juP6wJ
+
+To run this file as a standalone program, use
+
+		lumiere run
+
+Changelog:
+
+	0.9.0:
+				* First release.
+
+]]--
+if not http then
+  print("HTTP must be enabled.")
+  return
+end
+
+local VERSION = "0.9.0"
+
+local apiURL = "http://lakka.kapsi.fi:62096"
+
+--not currently used
+--local playerURL = "http://s3.amazonaws.com/MinecraftSkins/"
+
+
+-- PRIVATE FUNCTIONS
+-------------------------------------------------------------
+local function index(x,y,width,height)
+  if x%2 == 1 then
+    return height*(x-1)+(height-y)+1
+  else
+    return height*(x-1)+y
+  end
+end
+
+-- Returns HEX representation of num
+-- posted in snipplr.com by ukpyr
+-- stolen shamelessly, and tweaked a litte
+local function num2hex(num)
+    local hexstr = '0123456789abcdef'
+    local s = ''
+    while num > 0 do
+        local mod = math.fmod(num, 16)
+        s = string.sub(hexstr, mod+1, mod+1) .. s
+        num = math.floor(num / 16)
+    end
+    if s == '' then
+      s = '00'
+    elseif #s < 2 then
+      s = '0'..s
+    end
+    return s
+end
+-------------------------------------------------------------
+
+-- PUBLIC FUNCTIONS AND CLASSES
+-------------------------------------------------------------
+Screen = {}
+
+Screen.setColor = function(self,color)
+  for r = 1, self.height do
+    for c = 1, self.width do
+      self.illuminators[index(c,r,self.width,self.height)].setColor(tonumber(color,16))
+    end
+  end
+end
+
+Screen.showImage = function(self,image,x,y)
+  local x0 = x or 1
+  local y0 = y or 1
+  for r = math.max(y0,1), math.min(self.height, y0+#image-1) do
+    for c = math.max(x0,1), math.min(self.width, x0+(#image[1]/8)-1) do
+      self.illuminators[index(c,r,self.width,self.height)].setColor(tonumber(image[r-y0+1]:sub(1+8*(c-x0),8+8*(c-x0)),16))
+    end
+  end
+end
+
+Screen.showAnimation = function(self,frames,x,y,speed)
+  for i = 1,#frames do
+    self:showImage(frames[i],x,y)
+    sleep(1/speed)
+  end
+end
+
+initScreen = function(width,height,side)
+	local screen = {}
+	setmetatable(screen,{__index=Screen})
+	screen.width = width
+	screen.height = height
+	local modem = peripheral.wrap(side)
+	local periplist = modem.getNamesRemote()
+
+	local min_id = 1000000000000
+
+	for _,name in pairs(periplist) do
+	  if name:find("cofh_thermalexpansion_lamp") then
+	    local id = tonumber(name:sub(28,#name))
+	    if id < min_id then
+	      min_id = id
+	    end
+	  end
+	end
+
+	local illuminators = {}
+	for i = min_id,min_id+height*width-1 do
+	  local l = peripheral.wrap("cofh_thermalexpansion_lamp_"..tostring(i))
+	  table.insert(illuminators,l)
+	end
+	screen.illuminators = illuminators
+	return screen
+end
+
+getImage = function(url,size)
+	local vars = "url="..url
+	local vars = vars.."&maxsize="..tostring(size)
+	local resp = http.post(apiURL,vars)
+
+	if not resp then
+  		print("No response from image server.")
+  		return nil
+  	elseif resp.getResponseCode() ~= 200 then
+  		print("Error while connecting to server!")
+  		print("Server response")
+  		print("Code: "..resp.getResponseCode())
+  		print("Message:")
+  		print(resp.readAll())
+  		return nil
+	end
+
+	local oldSize = resp.readLine()
+	local newSize = resp.readLine()
+
+	if oldSize ~= newSize then
+ 		print("Original image size was (w,h): "..oldSize)
+  		print("New size is (w,h): "..newSize)
+	else
+  		print("Image size is (w,h): "..newSize)
+	end
+
+	local sizes = {}
+	for word in newSize:gmatch("%w+") do table.insert(sizes, word) end
+
+	local picWidth = tonumber(sizes[1])
+	local picHeight = tonumber(sizes[2])
+
+	local img = {}
+
+	local line = resp.readLine()
+	while line ~= nil do
+  		table.insert(img,line)
+  		line = resp.readLine()
+	end
+	resp.close()
+
+	return img
+end
+
+getAnimation = function(url,size)
+	vars = "url="..url
+	vars = vars.."&maxsize="..tostring(size)
+	vars = vars.."&animate=true"
+  	local resp = http.post(apiURL,vars)
+
+  	if not resp then
+  		print("No response from image server.")
+  		return nil
+  	elseif resp.getResponseCode() ~= 200 then
+  		print("Error while connecting to server!")
+  		print("Server response")
+  		print("Code: "..resp.getResponseCode())
+  		print("Message:")
+  		print(resp.readAll())
+  		return nil
+	end
+
+	local oldSize = resp.readLine()
+	local newSize = resp.readLine()
+
+	if oldSize ~= newSize then
+ 		print("Original image size was (w,h): "..oldSize)
+  		print("New size is (w,h): "..newSize)
+	else
+  		print("Image size is (w,h): "..newSize)
+	end
+
+	local sizes = {}
+	for word in newSize:gmatch("%w+") do table.insert(sizes, word) end
+
+	local picWidth = tonumber(sizes[1])
+	local picHeight = tonumber(sizes[2])
+
+	local img = {}
+
+	local line = resp.readLine()
+	while line ~= nil do
+  		table.insert(img,line)
+  		line = resp.readLine()
+	end
+	resp.close()
+
+	frames = {}
+  	frame = {}
+  	for _,line in pairs(img) do
+    	if line == "~" then
+    		table.insert(frames,frame)
+    		frame = {}
+    	else
+    		table.insert(frame,line)
+    	end
+  	end
+  
+	return frames
+end
+
+getColor = function(width,height,color)
+	local img = {}
+	for r = 1,height do
+		local line = string.rep(color,width)
+		table.insert(img,line)
+	end
+	return img
+end
+
+fade = function(screen,start,final,steps,speed)
+
+  for i = 1,steps do
+    local current = {}
+    for r = 1,#start do
+      line = ""
+      for c = 1,(#start[1]/8) do
+        local s_px = start[r]:sub(1+8*(c-1),8+8*(c-1))
+        local e_px = final[r]:sub(1+8*(c-1),8+8*(c-1))
+        local s_r, s_g, s_b = tonumber(s_px:sub(3,4),16), tonumber(s_px:sub(5,6),16), tonumber(s_px:sub(7,8),16)
+        local e_r, e_g, e_b = tonumber(e_px:sub(3,4),16), tonumber(e_px:sub(5,6),16), tonumber(e_px:sub(7,8),16)
+        local d_r = ((e_r-s_r)/(steps-1))*(i-1)
+        local d_g = ((e_g-s_g)/(steps-1))*(i-1)
+        local d_b = ((e_b-s_b)/(steps-1))*(i-1)
+        local c_r, c_g, c_b = s_r + d_r, s_g + d_g, s_b + d_b
+        line = line.."0x"..num2hex(c_r)..num2hex(c_g)..num2hex(c_b)
+      end
+      table.insert(current,line)
+    end
+    screen:showImage(current,1,1)
+    sleep(1/speed)
+  end
+end
+
+-------------------------------------------------------------
+
+args = {...}
+
+if #args > 0 then
+
+	print("Lumiere v "..VERSION)
+	print("Please input the screen size.")
+	local width
+	local height
+	while true do
+		term.write("Screen width: ")
+		width = tonumber(io.read())
+		if not width or width < 1 then
+			print("Bad input!")
+		else
+			break
+		end
+	end
+	while true do
+		term.write("Screen height: ")
+		height = tonumber(io.read())
+		if not height or height < 1 then
+			print("Bad input!")
+		else
+			break
+		end
+	end
+	
+	print("Initializing screen...")
+	local screen = initScreen(width, height)
+	screen:setColor("0xFFFFFF")
+	print("Testing...")
+	print("* white")
+	screen:setColor("0xFFFFFF")
+	sleep(1)
+	print("* red")
+	screen:setColor("0xFF0000")
+	sleep(1)
+	print("* green")
+	screen:setColor("0x00FF00")
+	sleep(1)
+	print("* blue")
+	screen:setColor("0x0000FF")
+	sleep(1)
+	print("* black")
+	screen:setColor("0x000000")
+	sleep(1)
+	print("Good to go!")
+	sleep(1)
+	local oldImg = getColor(screen.width,screen.height,"0x000000")
+	while true do
+		print("Give URL to show!")
+		term.write("URL: ")
+		local url = io.read()
+		local newImg = getImage(url,math.max(screen.width,screen.height))
+		if newImg then
+			fade(screen,oldImg,newImg,20,10)
+			sleep(2)
+			oldImg = newImg
+		else
+			print("Try again.")
+		end
+	end
+end
