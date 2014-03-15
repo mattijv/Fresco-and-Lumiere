@@ -316,16 +316,14 @@ if #args > 0 then
 	sleep(1)
 	print("Good to go!")
 	sleep(1)
-	local oldImg = getColor(screen.width,screen.height,"0x000000")
 	while true do
 		print("Give URL to show!")
 		term.write("URL: ")
 		local url = io.read()
-		local newImg = getImage(url,math.max(screen.width,screen.height))
-		if newImg then
-			fade(screen,oldImg,newImg,20,10)
+		local img = getImage(url,math.max(screen.width,screen.height))
+		if img then
+			screen:showImage(img,1,1)
 			sleep(2)
-			oldImg = newImg
 		else
 			print("Try again.")
 		end
